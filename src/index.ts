@@ -4,14 +4,18 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as cheerio from "cheerio";
 import { z } from "zod";
 
-const BASE_URL = "https://www.mainlynorfolk.info";
+const MAINLY_NORFOLK_URL = "https://www.mainlynorfolk.info";
+const WATERWAYS_URL = "https://www.waterwaysongs.info";
 
-// In-memory cache - be nice to the site
+// In-memory cache - be nice to the sites
 const cache = new Map<string, { data: string; expires: number }>();
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
 
-async function fetchPage(url: string): Promise<cheerio.CheerioAPI> {
-	const fullUrl = url.startsWith("http") ? url : `${BASE_URL}${url}`;
+async function fetchPage(
+	url: string,
+	base = MAINLY_NORFOLK_URL,
+): Promise<cheerio.CheerioAPI> {
+	const fullUrl = url.startsWith("http") ? url : `${base}${url}`;
 	const cached = cache.get(fullUrl);
 	if (cached && cached.expires > Date.now()) {
 		return cheerio.load(cached.data);
@@ -42,7 +46,7 @@ function normalizePath(href: string, basePath: string): string {
 		}
 	}
 
-	return "/" + baseParts.join("/");
+	return `/${baseParts.join("/")}`;
 }
 
 // Create the MCP server
@@ -54,10 +58,11 @@ const server = new McpServer({
 // Tool: Search for anything on the site
 server.tool(
 	"search_folk",
-	`Search Mainly Norfolk for folk music info. Use this to find:
+	`Search Mainly Norfolk and Waterways Songs for folk music info. Use this to find:
 - Artists (Martin Carthy, Shirley Collins, Steeleye Span, etc.)
-- Songs by title (Reynardine, Tam Lin, Barbara Allen, etc.)
+- Songs by title (Reynardine, Tam Lin, Barbara Allen, Hard Working Boater, etc.)
 - Child Ballad numbers (Child 84, Child 39, etc.)
+- Canal and waterways songs (350+ songs about inland waterways)
 - Albums and recordings
 Returns matching results with paths you can use with other tools.`,
 	{
@@ -127,6 +132,20 @@ Returns matching results with paths you can use with other tools.`,
 			}
 		});
 
+		// Also search Waterways Songs
+		const waterways$ = await fetchPage("/songmenu.htm", WATERWAYS_URL);
+		waterways$("a").each((_, el) => {
+			const href = waterways$(el).attr("href");
+			const text = waterways$(el).text().trim();
+			if (href?.includes("/Songs/") && text && text.toLowerCase().includes(q)) {
+				results.push({
+					text,
+					path: `${WATERWAYS_URL}${href}`,
+					type: "Waterways Song",
+				});
+			}
+		});
+
 		const unique = [...new Map(results.map((r) => [r.path, r])).values()].slice(
 			0,
 			25,
@@ -153,63 +172,111 @@ Returns matching results with paths you can use with other tools.`,
 // Tool: Get full page content
 server.tool(
 	"get_page",
-	`Fetch and read a page from Mainly Norfolk. Use paths from search results.
+	`Fetch and read a page from Mainly Norfolk or Waterways Songs. Use paths/URLs from search results.
 Good for reading about:
 - Artist biographies and discographies
 - Song histories, lyrics, and recorded versions
-- Album details and track listings`,
+- Album details and track listings
+- Canal and waterways song lyrics`,
 	{
 		path: z
 			.string()
 			.describe(
-				"Path to fetch, e.g. /martin.carthy/ or /folk/records/topic.html",
+				"Path or full URL to fetch, e.g. /martin.carthy/ or https://www.waterwaysongs.info/Songs/H/hard_working.htm",
 			),
 	},
 	async ({ path }) => {
-		const $ = await fetchPage(path);
+		const isWaterways = path.includes("waterwaysongs.info");
+		const base = isWaterways ? WATERWAYS_URL : MAINLY_NORFOLK_URL;
+		const $ = await fetchPage(path, base);
 
 		// Get title
 		const title = $("title").text().trim() || $("h1").first().text().trim();
 
-		// Get main content - try to find the meat
 		let content = "";
 
-		// Get all paragraphs and lists
-		$("p, li, h2, h3").each((_, el) => {
-			const text = $(el).text().trim();
-			if (text.length > 20) {
-				const tag = el.type === "tag" ? el.tagName : "";
-				if (tag === "h2" || tag === "h3") {
-					content += `\n\n## ${text}\n`;
-				} else {
-					content += `${text}\n\n`;
+		if (isWaterways) {
+			// Waterways site uses Xara HTML with spans
+			// Extract author
+			const author = $(".XX-95Author").first().text().trim();
+			if (author) content += `**${author}**\n\n`;
+
+			// Extract lyrics - they're in spans with Lyrics classes
+			const lyrics: string[] = [];
+			$("span.xr_tl").each((_, el) => {
+				const text = $(el).text().trim();
+				const classes = $(el).attr("class") || "";
+				if (classes.includes("Lyrics") && text) {
+					lyrics.push(text);
 				}
+			});
+			if (lyrics.length > 0) {
+				content += "## Lyrics\n\n";
+				content += `${lyrics.join("\n")}\n\n`;
 			}
-		});
 
-		// Get any song lyrics (often in pre tags)
-		$("pre").each((_, el) => {
-			const text = $(el).text().trim();
-			if (text) {
-				content += `\n\`\`\`\n${text}\n\`\`\`\n`;
+			// Extract notes
+			const notes: string[] = [];
+			$("span.xr_tl").each((_, el) => {
+				const text = $(el).text().trim();
+				const classes = $(el).attr("class") || "";
+				if (
+					classes.includes("Notes") &&
+					text &&
+					!text.startsWith("Recorded on")
+				) {
+					notes.push(text);
+				}
+			});
+			if (notes.length > 0) {
+				content += "## Notes\n\n";
+				content += `${notes.join("\n")}\n\n`;
 			}
-		});
 
-		// Find linked recordings/versions
-		const recordings: string[] = [];
-		$("a").each((_, el) => {
-			const href = $(el).attr("href");
-			const text = $(el).text().trim();
-			if (href?.includes("records/") && text) {
-				recordings.push(`- ${text}`);
+			// Check for audio
+			const audioSrc = $("audio").attr("src");
+			if (audioSrc) {
+				content += `## Audio\n${audioSrc}\n\n`;
 			}
-		});
+		} else {
+			// Mainly Norfolk - standard HTML
+			// Get all paragraphs and lists
+			$("p, li, h2, h3").each((_, el) => {
+				const text = $(el).text().trim();
+				if (text.length > 20) {
+					const tag = el.type === "tag" ? el.tagName : "";
+					if (tag === "h2" || tag === "h3") {
+						content += `\n\n## ${text}\n`;
+					} else {
+						content += `${text}\n\n`;
+					}
+				}
+			});
 
-		let result = `# ${title}\n\n${content.slice(0, 6000)}`;
-		if (recordings.length > 0) {
-			result += `\n\n## Recordings\n${[...new Set(recordings)].slice(0, 30).join("\n")}`;
+			// Get any song lyrics (often in pre tags)
+			$("pre").each((_, el) => {
+				const text = $(el).text().trim();
+				if (text) {
+					content += `\n\`\`\`\n${text}\n\`\`\`\n`;
+				}
+			});
+
+			// Find linked recordings/versions
+			const recordings: string[] = [];
+			$("a").each((_, el) => {
+				const href = $(el).attr("href");
+				const text = $(el).text().trim();
+				if (href?.includes("records/") && text) {
+					recordings.push(`- ${text}`);
+				}
+			});
+
+			if (recordings.length > 0) {
+				content += `\n\n## Recordings\n${[...new Set(recordings)].slice(0, 30).join("\n")}`;
+			}
 		}
 
+		const result = `# ${title}\n\n${content.slice(0, 6000)}`;
 		return { content: [{ type: "text" as const, text: result }] };
 	},
 );

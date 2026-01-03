@@ -28,17 +28,21 @@ async function fetchPage(url: string): Promise<cheerio.CheerioAPI> {
 function normalizePath(href: string, basePath: string): string {
 	if (href.startsWith("http")) return href;
 	if (href.startsWith("/")) return href;
-	if (href.startsWith("../")) {
-		const baseDir = basePath.split("/").slice(0, -1).join("/");
-		return normalizePath(
-			href.slice(3),
-			baseDir.split("/").slice(0, -1).join("/") || "/",
-		);
+
+	// Handle ../ by building absolute path
+	const baseParts = basePath.split("/").filter(Boolean);
+	if (!basePath.endsWith("/")) baseParts.pop(); // remove filename if present
+
+	const hrefParts = href.split("/");
+	for (const part of hrefParts) {
+		if (part === "..") {
+			baseParts.pop();
+		} else if (part !== ".") {
+			baseParts.push(part);
+		}
 	}
-	const baseDir = basePath.endsWith("/")
-		? basePath
-		: basePath.split("/").slice(0, -1).join("/");
-	return `${baseDir}/${href}`;
+
+	return "/" + baseParts.join("/");
 }
 
 // Create the MCP server
@@ -105,6 +109,20 @@ Returns matching results with paths you can use with other tools.`,
 					text,
 					path: normalizePath(href, "/folk/songs/"),
 					type: "Laws Index",
+				});
+			}
+		});
+
+		// And the general songs index
+		const songs$ = await fetchPage("/folk/songs/");
+		songs$("a").each((_, el) => {
+			const href = songs$(el).attr("href");
+			const text = songs$(el).text().trim();
+			if (href && text && text.toLowerCase().includes(q)) {
+				results.push({
+					text,
+					path: normalizePath(href, "/folk/songs/"),
+					type: "Song",
 				});
 			}
 		});

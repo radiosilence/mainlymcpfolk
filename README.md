@@ -18,7 +18,11 @@ Ask about Martin Carthy's discography, find recordings of Child Ballad 84, look 
 ## Install
 
 ```bash
-bun install
+# mise
+mise use -g npm:mainlymcpfolk
+
+# or npm
+npm install -g mainlymcpfolk
 ```
 
 ## Connect to Claude Desktop
@@ -29,14 +33,12 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "folk": {
-      "command": "bun",
-      "args": ["run", "FULL_PATH_TO/mainlymcpfolk/src/index.ts"]
+      "command": "bunx",
+      "args": ["mainlymcpfolk"]
     }
   }
 }
 ```
-
-Replace `FULL_PATH_TO` with the actual path where you cloned this repo.
 
 Restart Claude Desktop. Tools appear in the 🔧 menu.
 

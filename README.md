@@ -1,5 +1,20 @@
 # mainlymcpfolk
 
+> **Superseded by [mainlynorfolk-cli](https://github.com/radiosilence/mainlynorfolk-cli).**
+>
+> This repository is archived. The replacement is a Rust CLI and MCP server
+> covering the same archive and more: a composable GraphQL API instead of a
+> tool per operation, the archive's own `search.php` endpoints instead of
+> downloading and grepping a 670KB index, the bibliography and record-label
+> discographies it never reached, and a three-layer cache so a session that
+> reads a page twice fetches it once.
+>
+> The npm package `mainlymcpfolk` still installs and still works. It is no
+> longer maintained.
+>
+> One correction worth carrying over: the text below claimed the 305 Child
+> Ballads. The archive has pages for 209 of them.
+
 MCP server that gives Claude deep knowledge of British folk music via [Mainly Norfolk](https://www.mainlynorfolk.info/folk/).
 
 Ask about Martin Carthy's discography, find recordings of Child Ballad 84, look up who's covered "Reynardine", get lyrics to "Tam Lin" - the full encyclopaedia of English folk tradition at your fingertips.
